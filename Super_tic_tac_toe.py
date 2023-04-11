@@ -15,6 +15,8 @@ SMALL_LINE_THICKNESS = 1
 LINE_COLOR = (255, 255, 255)
 BACKGROUND_COLOR = (0, 0, 0)
 
+FPS = 60
+
 class SmallBoard:
 	def __init__(self, row=0, col=0):
 		self.board: list[list[int]] = [[0] * 3 for i in range(3)] # 0 - unplayed, 1 - first, 2 - second
@@ -53,34 +55,50 @@ class SmallBoard:
 				elif cell == 2:
 					self._drawSecond(display, cellPos)
 
-
-
 class Board:
 	def __init__(self):
 		self.board: list[list[SmallBoard]] = [[SmallBoard(row, col) for col in range(3)] for row in range(3)]
-		# test
-		self.board[2][1].board[0][2] = 1
-		self.board[1][0].board[2][1] = 2
-
+	def play(self, topX, topY, innerX, innerY, move):
+		self.board[topY][topX].board[innerY][innerX] = move
 	def draw(self, display):
 		for line in self.board:
 			for board in line:
 				board.draw(display)
 
+class Game:
+	def __init__(self):
+		self.board = Board()
+		self.playerOnTurn: int = 1 # 1, 2
+
+	def click(self, pos) -> bool:
+		if pos[1] < BOARD_Y: return False
+		cellPos = pos[0] // CELL_SIZE, (pos[1] - BOARD_Y) // CELL_SIZE
+		self.board.play(cellPos[0] // 3, cellPos[1] // 3, cellPos[0] % 3, cellPos[1] % 3, self.playerOnTurn)
+		self.advancePlayer()
+		return True
+	def advancePlayer(self):
+		self.playerOnTurn = 3 - self.playerOnTurn
+	def draw(self, display):
+		self.board.draw(display)
+
 def main():
 	display = pygame.display.set_mode((WIDTH, HEIGHT))
 	
-	board = Board()
+	game = Game()
 
 	running = True
 	while running:
 		for event in pygame.event.get():
 			if event.type == pygame.QUIT:
 				running = False
+			elif event.type == pygame.MOUSEBUTTONDOWN:
+				if event.button == 1:
+					game.click(event.pos)
 		
 		display.fill(BACKGROUND_COLOR)
-		board.draw(display)
+		game.draw(display)
 		pygame.display.update()
+		pygame.time.Clock().tick(FPS)
 
 if __name__ == '__main__':
 	main()
