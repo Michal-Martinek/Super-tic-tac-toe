@@ -31,6 +31,9 @@ class SmallBoard:
 		self.board: list[list[int]] = [[0] * 3 for i in range(3)] # 0 - unplayed, 1 - first, 2 - second
 		self.row = row
 		self.col = col
+	
+	def getFree(self, Xoff=0, Yoff=0) -> set[tuple[int, int]]:
+		return set([(x + Xoff * 3, y + Yoff * 3) for x in range(3) for y in range(3) if self.board[y][x] == 0])
 
 	@ staticmethod
 	def _drawFirst(display, pos): # cross
@@ -41,6 +44,43 @@ class SmallBoard:
 	def _drawSecond(display, pos): # circle
 		pos = pos[0] + CELL_SIZE // 2, pos[1] + CELL_SIZE // 2
 		pygame.draw.circle(display, (0, 0, 255), pos, CELL_INNER_SIZE // 2, MARK_THICKNESS)
+
+	def draw(self, display, opened: set[tuple[int, int]]):
+		pos = self.col * CELL_SIZE * 3, self.row * CELL_SIZE * 3 + BOARD_Y
+		for y, cells in enumerate(self.board):
+			for x, cell in enumerate(cells):
+				cellPos = pos[0] + x * CELL_SIZE, pos[1] + y * CELL_SIZE
+				if cell == 1:
+					self._drawFirst(display, cellPos)
+				elif cell == 2:
+					self._drawSecond(display, cellPos)
+				elif (x + self.col * 3, y + self.row * 3) in opened:
+					cellPadd = (CELL_SIZE - CELL_INNER_SIZE) // 2
+					pygame.draw.rect(display, (5, 91, 115), (pos[0] + CELL_SIZE * x + cellPadd, pos[1] + CELL_SIZE * y + cellPadd, CELL_INNER_SIZE, CELL_INNER_SIZE))
+
+class Board:
+	def __init__(self):
+		self.board: list[list[SmallBoard]] = [[SmallBoard(row, col) for col in range(3)] for row in range(3)]
+		self.openSubBoard = (-1, -1) # open all
+		self.opened: set[tuple[int, int]] = self.getOpened()
+
+	def getOpened(self) -> set[tuple[int, int]]:
+		if self.openSubBoard != (-1, -1):
+			opened = self.board[self.openSubBoard[1]][self.openSubBoard[0]].getFree(*self.openSubBoard)
+		if self.openSubBoard == (-1, -1) or len(opened) == 0:
+			self.openSubBoard = (-1, -1)
+			opened = set()
+			for x in range(3):
+				for y in range(3):
+					opened = opened.union(self.board[y][x].getFree(x, y))
+		return opened
+
+	def makeMove(self, pos: tuple[int, int], move) -> bool:
+		if free := (pos in self.opened):
+			self.board[pos[1] // 3][pos[0] // 3].board[pos[1] % 3][pos[0] % 3] = move
+			self.openSubBoard = pos[0] % 3, pos[1] % 3
+			self.opened = self.getOpened()
+		return free
 
 	def drawLines(self, display, pos=(0, 0), big=True):
 		if big: pygame.draw.line(display, LINE_COLOR, (0, BOARD_Y), (WIDTH, BOARD_Y), HEADER_LINE_THICKNESS)
@@ -55,26 +95,9 @@ class SmallBoard:
 					self.drawLines(display, (i, j), False)
 	def draw(self, display):
 		self.drawLines(display)
-		pos = self.col * CELL_SIZE * 3, self.row * CELL_SIZE * 3 + BOARD_Y
-		for y, cells in enumerate(self.board):
-			for x, cell in enumerate(cells):
-				cellPos = pos[0] + x * CELL_SIZE, pos[1] + y * CELL_SIZE
-				if cell == 1:
-					self._drawFirst(display, cellPos)
-				elif cell == 2:
-					self._drawSecond(display, cellPos)
-
-class Board:
-	def __init__(self):
-		self.board: list[list[SmallBoard]] = [[SmallBoard(row, col) for col in range(3)] for row in range(3)]
-	def makeMove(self, topX: int, topY: int, innerX: int, innerY: int, move) -> bool:
-		if free := (self.board[topY][topX].board[innerY][innerX] == 0):
-			self.board[topY][topX].board[innerY][innerX] = move
-		return free
-	def draw(self, display):
 		for line in self.board:
 			for board in line:
-				board.draw(display)
+				board.draw(display, self.opened)
 
 class Game:
 	def __init__(self):
@@ -87,7 +110,7 @@ class Game:
 	def click(self, mousePos) -> bool:
 		pos = self._getClickPos(mousePos)
 		if pos == (-1, -1): return False
-		if sucess := self.board.makeMove(pos[0] // 3, pos[1] // 3, pos[0] % 3, pos[1] % 3, self.playerOnTurn):
+		if sucess := self.board.makeMove(pos, self.playerOnTurn):
 			self.advancePlayer()
 		return sucess
 	def advancePlayer(self):
