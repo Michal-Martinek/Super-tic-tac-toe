@@ -17,6 +17,15 @@ BACKGROUND_COLOR = (0, 0, 0)
 
 FPS = 60
 
+pygame.init()
+FONT = pygame.font.SysFont('arial', int(BOARD_Y * 3/4))
+HEADER_TEXT_POS = (WIDTH // 4, BOARD_Y // 6)
+
+
+def renderText(display, color, pos, text):
+	label = FONT.render(text, 1, color)
+	display.blit(label, pos)
+
 class SmallBoard:
 	def __init__(self, row=0, col=0):
 		self.board: list[list[int]] = [[0] * 3 for i in range(3)] # 0 - unplayed, 1 - first, 2 - second
@@ -58,8 +67,10 @@ class SmallBoard:
 class Board:
 	def __init__(self):
 		self.board: list[list[SmallBoard]] = [[SmallBoard(row, col) for col in range(3)] for row in range(3)]
-	def play(self, topX, topY, innerX, innerY, move):
-		self.board[topY][topX].board[innerY][innerX] = move
+	def makeMove(self, topX: int, topY: int, innerX: int, innerY: int, move) -> bool:
+		if free := (self.board[topY][topX].board[innerY][innerX] == 0):
+			self.board[topY][topX].board[innerY][innerX] = move
+		return free
 	def draw(self, display):
 		for line in self.board:
 			for board in line:
@@ -70,16 +81,21 @@ class Game:
 		self.board = Board()
 		self.playerOnTurn: int = 1 # 1, 2
 
-	def click(self, pos) -> bool:
-		if pos[1] < BOARD_Y: return False
-		cellPos = pos[0] // CELL_SIZE, (pos[1] - BOARD_Y) // CELL_SIZE
-		self.board.play(cellPos[0] // 3, cellPos[1] // 3, cellPos[0] % 3, cellPos[1] % 3, self.playerOnTurn)
-		self.advancePlayer()
-		return True
+	def _getClickPos(self, mousePos):
+		if mousePos[1] < BOARD_Y: return (-1, -1)
+		return (mousePos[0] // CELL_SIZE, (mousePos[1] - BOARD_Y) // CELL_SIZE)
+	def click(self, mousePos) -> bool:
+		pos = self._getClickPos(mousePos)
+		if pos == (-1, -1): return False
+		if sucess := self.board.makeMove(pos[0] // 3, pos[1] // 3, pos[0] % 3, pos[1] % 3, self.playerOnTurn):
+			self.advancePlayer()
+		return sucess
 	def advancePlayer(self):
 		self.playerOnTurn = 3 - self.playerOnTurn
 	def draw(self, display):
 		self.board.draw(display)
+		headerText = f'{("First", "Second")[self.playerOnTurn == 2]} player on turn!'
+		renderText(display, LINE_COLOR, HEADER_TEXT_POS, headerText)
 
 def main():
 	display = pygame.display.set_mode((WIDTH, HEIGHT))
