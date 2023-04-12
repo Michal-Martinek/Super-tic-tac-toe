@@ -1,4 +1,7 @@
 import pygame
+import threading
+from queue import Queue, Empty
+
 import Ai
 
 WIDTH = 720
@@ -49,6 +52,11 @@ class SmallBoard:
 		self.row = row
 		self.col = col
 		self.won = 0 # 0, 1, 2
+	def copy(self):
+		board = SmallBoard(self.row, self.col)
+		board.board = [[x for x in line] for line in self.board]
+		board.won = self.won
+		return board
 	
 	def makeMove(self, X, Y, move) -> bool:
 		assert not self.won, 'cannot make moves to won sub-boards'
@@ -101,6 +109,13 @@ class Board:
 		self.openSubBoard = (-1, -1) # open all
 		self.opened: set[tuple[int, int]] = self.getOpened()
 		self.won = 0 # 0, 1, 2
+	def copy(self):
+		board = Board()
+		board.board = [[b.copy() for b in line] for line in self.board]
+		board.openSubBoard = self.openSubBoard
+		board.opened = self.opened.copy()
+		board.won = self.won
+		return board
 
 	def getOpened(self) -> set[tuple[int, int]]:
 		if self.openSubBoard != (-1, -1):
@@ -144,10 +159,19 @@ class Board:
 				board.draw(display, self.opened)
 
 class Game:
-	def __init__(self):
+	def __init__(self, vsAi=False):
 		self.board = Board()
 		self.playerOnTurn: int = 1 # 1, 2
 		self.won = 0 # 0, 1, 2
+		self.vsAi = vsAi
+
+		if vsAi:
+			self.aiQueue: Queue[Board] = Queue()
+			self.responseQueue: Queue[tuple[int, int]] = Queue()
+			self.endEvent = threading.Event()
+			self.aiThread = threading.Thread(target=Ai.threadLoop, args=(self.aiQueue, self.responseQueue, self.endEvent), daemon=True)
+			self.aiThread.start()
+			self.waitingForAi = False
 
 	def _getClickPos(self, mousePos):
 		if mousePos[1] < BOARD_Y: return (-1, -1)
@@ -158,17 +182,37 @@ class Game:
 			if won: self.won = won
 			self.advancePlayer()
 		return sucess, won
-	def click(self, mousePos) -> bool:
+	def click(self, mousePos):
 		pos = self._getClickPos(mousePos)
-		if pos == (-1, -1): return False
-		return self.makeMove(pos)
+		if pos == (-1, -1): return
+		if self.vsAi and self.playerOnTurn == 2: return
+		sucess, won = self.makeMove(pos)
+		if self.vsAi and self.playerOnTurn == 2:
+			self.sendToThread()
 	def advancePlayer(self):
 		self.playerOnTurn = 3 - self.playerOnTurn
-	def draw(self, display, vsAi=False):
+	def draw(self, display):
 		self.board.draw(display)
 		headerText = f'{("First", "Second")[self.playerOnTurn == 2]} player on turn!'
-		if vsAi and self.playerOnTurn == 2: headerText = 'The AI is playing...'
+		if self.vsAi and self.playerOnTurn == 2: headerText = 'The AI is playing...'
 		renderText(display, LINE_COLOR, HEADER_TEXT_POS, headerText)
+	# ai integration
+	def sendToThread(self):
+		self.waitingForAi = True
+		self.aiQueue.put(self.board.copy())
+	def update(self):
+		assert self.aiThread.is_alive(), 'Ai thread died'
+		try:
+			move = self.responseQueue.get(block=False)
+			self.waitingForAi = False
+		except Empty:
+			return False
+		sucess, _ = self.makeMove(move)
+		assert sucess, f'The ai made invalid move {move}'
+	def close(self):
+		self.endEvent.set()
+		while self.aiThread.is_alive():
+			pass
 
 def menu(display: pygame.Surface) -> int: # modes: 0 - exit, 1 - PvP, 2 - vs ai
 	display.fill(BACKGROUND_COLOR)
@@ -207,7 +251,7 @@ def winScreen(display: pygame.Surface, won: int, mode: int):
 		pygame.time.Clock().tick(FPS)
 
 def game(display: pygame.Surface, mode: int) -> int:	
-	game = Game()
+	game = Game(mode == 2)
 	running = True
 	while running:
 		for event in pygame.event.get():
@@ -215,20 +259,19 @@ def game(display: pygame.Surface, mode: int) -> int:
 				running = False
 			elif event.type == pygame.MOUSEBUTTONDOWN:
 				if event.button == 1:
-					if game.click(event.pos):
-						if mode == 2:
-							move = Ai.ai()
-							sucess, _ = game.makeMove(move)
-							assert sucess, f'The ai made invalid move {move}'
+					game.click(event.pos)
 		
+		if mode == 2: game.update()
 		if game.won:
 			running = False
 		else:
 			display.fill(BACKGROUND_COLOR)
-			game.draw(display, mode == 2)
+			game.draw(display)
 			pygame.display.update()
 			pygame.time.Clock().tick(FPS)
-	return game.won
+	won = game.won
+	game.close()
+	return won
 
 def main():
 	display = pygame.display.set_mode((WIDTH, HEIGHT))
