@@ -19,15 +19,27 @@ LINE_COLOR = (255, 255, 255)
 BACKGROUND_COLOR = (0, 0, 0)
 SHADOW_MARK_COLOR = (128, 128, 128)
 
+MENU_HEADER_RECT = pygame.Rect(100, 70, WIDTH-200, 100)
+MENU_BUTTON_WIDTH = 150
+MENU_BUTTON_RECTS = [pygame.Rect(WIDTH//2 - MENU_BUTTON_WIDTH//2, 250, MENU_BUTTON_WIDTH, 80),  pygame.Rect(WIDTH//2 - MENU_BUTTON_WIDTH//2, 380, MENU_BUTTON_WIDTH, 80)]
+
 FPS = 60
 
 pygame.init()
 FONT = pygame.font.SysFont('arial', int(BOARD_Y * 3/4))
+HEADER_FONT = pygame.font.SysFont('arial', 80)
 HEADER_TEXT_POS = (WIDTH // 4, BOARD_Y // 6)
 
 
-def renderText(display, color, pos, text):
-	label = FONT.render(text, 1, color)
+def renderText(display, color, pos, text, font=FONT):
+	label = font.render(text, 1, color)
+	display.blit(label, pos)
+def renderTextInRect(display, color, rect, text, font=FONT, backgroundColor=None, boundaryColor=None, boundaryThickness=3):
+	label = font.render(text, 1, color)
+	pos = pygame.Rect(0, 0, label.get_width(), label.get_height())
+	pos.center = rect.center
+	if backgroundColor: pygame.draw.rect(display, backgroundColor, rect)
+	if boundaryColor: pygame.draw.rect(display, boundaryColor, rect, boundaryThickness)
 	display.blit(label, pos)
 
 class SmallBoard:
@@ -154,11 +166,41 @@ class Game:
 		headerText = f'{("First", "Second")[self.playerOnTurn == 2]} player on turn!'
 		renderText(display, LINE_COLOR, HEADER_TEXT_POS, headerText)
 
-def main():
-	display = pygame.display.set_mode((WIDTH, HEIGHT))
-	
-	game = Game()
+def menu(display: pygame.Surface) -> int: # modes: 0 - exit, 1 - PvP, 2 - vs ai
+	display.fill(BACKGROUND_COLOR)
+	renderTextInRect(display, (255, 0, 0), MENU_HEADER_RECT, 'Super-tic-tac-toe', HEADER_FONT)
+	renderTextInRect(display, (0, 0, 0), MENU_BUTTON_RECTS[0], 'PvP', FONT, (255, 255, 255), (0, 0, 255))
+	renderTextInRect(display, (0, 0, 0), MENU_BUTTON_RECTS[1], 'PvAi', FONT, (255, 255, 255), (0, 0, 255))
+	pygame.display.update()
 
+	while True:
+		for event in pygame.event.get():
+			if event.type == pygame.QUIT:
+				return 0
+			elif event.type == pygame.MOUSEBUTTONDOWN:
+				if event.button == 1:
+					if MENU_BUTTON_RECTS[0].collidepoint(event.pos):
+						return 1
+					if MENU_BUTTON_RECTS[1].collidepoint(event.pos):
+						return 2
+		pygame.time.Clock().tick(FPS)
+def winScreen(display: pygame.Surface, won: int):
+	assert won in [1, 2]
+	display.fill(BACKGROUND_COLOR)
+	renderTextInRect(display, (255, 255, 255), MENU_HEADER_RECT, f'{["First", "Second"][won-1]} player won!!', HEADER_FONT)
+	renderText(display, (255, 0, 0), (200, 500), 'Click to exit...')
+	pygame.display.update()
+
+	while True:
+		for event in pygame.event.get():
+			if event.type == pygame.QUIT:
+				return
+			elif event.type == pygame.MOUSEBUTTONDOWN:
+				return
+		pygame.time.Clock().tick(FPS)
+
+def game(display: pygame.Surface, mode: int) -> int:	
+	game = Game()
 	running = True
 	while running:
 		for event in pygame.event.get():
@@ -169,13 +211,20 @@ def main():
 					game.click(event.pos)
 		
 		if game.won:
-			print(f'player {game.won} won!')
 			running = False
 		else:
 			display.fill(BACKGROUND_COLOR)
 			game.draw(display)
 			pygame.display.update()
 			pygame.time.Clock().tick(FPS)
+	return game.won
+
+def main():
+	display = pygame.display.set_mode((WIDTH, HEIGHT))
+	mode = menu(display)
+	if mode == 0: return
+	won = game(display, mode)
+	winScreen(display, 2)
 
 if __name__ == '__main__':
 	main()
