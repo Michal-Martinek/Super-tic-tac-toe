@@ -1,4 +1,5 @@
 import pygame
+import Ai
 
 WIDTH = 720
 HEIGHT = 770
@@ -151,19 +152,22 @@ class Game:
 	def _getClickPos(self, mousePos):
 		if mousePos[1] < BOARD_Y: return (-1, -1)
 		return (mousePos[0] // CELL_SIZE, (mousePos[1] - BOARD_Y) // CELL_SIZE)
-	def click(self, mousePos) -> bool:
-		pos = self._getClickPos(mousePos)
-		if pos == (-1, -1): return False
-		sucess, won = self.board.makeMove(pos, self.playerOnTurn)
+	def makeMove(self, move: tuple[int, int]) -> tuple[bool, int]:
+		sucess, won = self.board.makeMove(move, self.playerOnTurn)
 		if sucess:
 			if won: self.won = won
 			self.advancePlayer()
-		return sucess
+		return sucess, won
+	def click(self, mousePos) -> bool:
+		pos = self._getClickPos(mousePos)
+		if pos == (-1, -1): return False
+		return self.makeMove(pos)
 	def advancePlayer(self):
 		self.playerOnTurn = 3 - self.playerOnTurn
-	def draw(self, display):
+	def draw(self, display, vsAi=False):
 		self.board.draw(display)
 		headerText = f'{("First", "Second")[self.playerOnTurn == 2]} player on turn!'
+		if vsAi and self.playerOnTurn == 2: headerText = 'The AI is playing...'
 		renderText(display, LINE_COLOR, HEADER_TEXT_POS, headerText)
 
 def menu(display: pygame.Surface) -> int: # modes: 0 - exit, 1 - PvP, 2 - vs ai
@@ -184,10 +188,13 @@ def menu(display: pygame.Surface) -> int: # modes: 0 - exit, 1 - PvP, 2 - vs ai
 					if MENU_BUTTON_RECTS[1].collidepoint(event.pos):
 						return 2
 		pygame.time.Clock().tick(FPS)
-def winScreen(display: pygame.Surface, won: int):
-	assert won in [1, 2]
+def winScreen(display: pygame.Surface, won: int, mode: int):
 	display.fill(BACKGROUND_COLOR)
-	renderTextInRect(display, (255, 255, 255), MENU_HEADER_RECT, f'{["First", "Second"][won-1]} player won!!', HEADER_FONT)
+	if mode == 1:
+		text = f'{["First", "Second"][won-1]} player won!!'
+	else:
+		text = ["You won!!  :-)", "The AI won!!  :-("][won-1]
+	renderTextInRect(display, (255, 255, 255), MENU_HEADER_RECT, text, HEADER_FONT)
 	renderText(display, (255, 0, 0), (200, 500), 'Click to exit...')
 	pygame.display.update()
 
@@ -208,13 +215,17 @@ def game(display: pygame.Surface, mode: int) -> int:
 				running = False
 			elif event.type == pygame.MOUSEBUTTONDOWN:
 				if event.button == 1:
-					game.click(event.pos)
+					if game.click(event.pos):
+						if mode == 2:
+							move = Ai.ai()
+							sucess, _ = game.makeMove(move)
+							assert sucess, f'The ai made invalid move {move}'
 		
 		if game.won:
 			running = False
 		else:
 			display.fill(BACKGROUND_COLOR)
-			game.draw(display)
+			game.draw(display, mode == 2)
 			pygame.display.update()
 			pygame.time.Clock().tick(FPS)
 	return game.won
@@ -224,7 +235,8 @@ def main():
 	mode = menu(display)
 	if mode == 0: return
 	won = game(display, mode)
-	winScreen(display, 2)
+	if won == 0: return
+	winScreen(display, won, mode)
 
 if __name__ == '__main__':
 	main()
