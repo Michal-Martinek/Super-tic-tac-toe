@@ -87,6 +87,7 @@ class Board:
 		self.board: list[list[SmallBoard]] = [[SmallBoard(row, col) for col in range(3)] for row in range(3)]
 		self.openSubBoard = (-1, -1) # open all
 		self.opened: set[tuple[int, int]] = self.getOpened()
+		self.won = 0 # 0, 1, 2
 
 	def getOpened(self) -> set[tuple[int, int]]:
 		if self.openSubBoard != (-1, -1):
@@ -98,16 +99,19 @@ class Board:
 				for y in range(3):
 					opened = opened.union(self.board[y][x].getFree(x, y))
 		return opened
-
-	def makeMove(self, pos: tuple[int, int], move) -> bool:
+	def checkWholeWin(self):
+		board = SmallBoard()
+		board.board = [[b.won for b in line] for line in self.board]
+		return board.isWon()
+	def makeMove(self, pos: tuple[int, int], move) -> tuple[bool, int]:
 		if free := (pos in self.opened):
 			won = self.board[pos[1] // 3][pos[0] // 3].makeMove(pos[0] % 3, pos[1] % 3, move)
 			if won:
-				print('board won')
+				self.won = self.checkWholeWin()
 			self.openSubBoard = pos[0] % 3, pos[1] % 3
 			if self.board[pos[1] % 3][pos[0] % 3].won: self.openSubBoard = (-1, -1)
 			self.opened = self.getOpened()
-		return free
+		return free, self.won
 
 	def drawLines(self, display, pos=(0, 0), big=True):
 		if big: pygame.draw.line(display, LINE_COLOR, (0, BOARD_Y), (WIDTH, BOARD_Y), HEADER_LINE_THICKNESS)
@@ -130,6 +134,7 @@ class Game:
 	def __init__(self):
 		self.board = Board()
 		self.playerOnTurn: int = 1 # 1, 2
+		self.won = 0 # 0, 1, 2
 
 	def _getClickPos(self, mousePos):
 		if mousePos[1] < BOARD_Y: return (-1, -1)
@@ -137,7 +142,9 @@ class Game:
 	def click(self, mousePos) -> bool:
 		pos = self._getClickPos(mousePos)
 		if pos == (-1, -1): return False
-		if sucess := self.board.makeMove(pos, self.playerOnTurn):
+		sucess, won = self.board.makeMove(pos, self.playerOnTurn)
+		if sucess:
+			if won: self.won = won
 			self.advancePlayer()
 		return sucess
 	def advancePlayer(self):
@@ -161,10 +168,14 @@ def main():
 				if event.button == 1:
 					game.click(event.pos)
 		
-		display.fill(BACKGROUND_COLOR)
-		game.draw(display)
-		pygame.display.update()
-		pygame.time.Clock().tick(FPS)
+		if game.won:
+			print(f'player {game.won} won!')
+			running = False
+		else:
+			display.fill(BACKGROUND_COLOR)
+			game.draw(display)
+			pygame.display.update()
+			pygame.time.Clock().tick(FPS)
 
 if __name__ == '__main__':
 	main()
