@@ -52,27 +52,39 @@ class SmallBoard:
 		self.row = row
 		self.col = col
 		self.won = 0 # 0, 1, 2
+		self.freeSpaces = 9
 	def copy(self):
 		board = SmallBoard(self.row, self.col)
 		board.board = [[x for x in line] for line in self.board]
 		board.won = self.won
+		board.freeSpaces = self.freeSpaces
 		return board
+	def __hash__(self):
+		return hash(tuple([tuple(line) for line in self.board]))
+	def done(self):
+		return self.freeSpaces == 0 or bool(self.won)
 	
-	def makeMove(self, X, Y, move) -> bool:
-		assert not self.won, 'cannot make moves to won sub-boards'
+	def makeMove(self, X, Y, move):
+		assert not self.done(), 'cannot make moves to done sub-boards'
 		self.board[Y][X] = move
-		self.won = self.isWon()
-		return self.won
-	def isWon(self) -> int:
+		self.freeSpaces -= 1
+		self.checkWin()
+	def madeMove(self, X, Y, move):
+		b = self.copy()
+		b.makeMove(X, Y, move)
+		return b
+	def checkWin(self):
 		for i in range(3):
 			row = all([tile == self.board[i][0] for tile in self.board[i]]) and self.board[i][0]
 			col = all([self.board[j][i] == self.board[0][i] for j in range(3)]) and self.board[0][i]
-			if row or col: return row or col
+			if row or col:
+				self.won = row or col
+				return
 		dia1 = self.board[0][0] == self.board[1][1] == self.board[2][2]
 		dia2 = self.board[0][2] == self.board[1][1] == self.board[2][0]
-		return (dia1 and self.board[0][0]) or (dia2 and self.board[0][2])
+		self.won = int((dia1 and self.board[0][0]) or (dia2 and self.board[0][2]))
 	def getFree(self, Xoff=0, Yoff=0) -> set[tuple[int, int]]:
-		if self.won: return set()
+		if self.done(): return set()
 		return set([(x + Xoff * 3, y + Yoff * 3) for x in range(3) for y in range(3) if self.board[y][x] == 0])
 
 	@ staticmethod
@@ -107,8 +119,10 @@ class Board:
 	def __init__(self):
 		self.board: list[list[SmallBoard]] = [[SmallBoard(row, col) for col in range(3)] for row in range(3)]
 		self.openSubBoard = (-1, -1) # open all
-		self.opened: set[tuple[int, int]] = self.getOpened()
+		self.opened: set[tuple[int, int]]
+		self.getOpened()
 		self.won = 0 # 0, 1, 2
+		self.done = False
 	def copy(self):
 		board = Board()
 		board.board = [[b.copy() for b in line] for line in self.board]
@@ -117,30 +131,40 @@ class Board:
 		board.won = self.won
 		return board
 
-	def getOpened(self) -> set[tuple[int, int]]:
+	def getOpened(self):
+		self.opened = set()
 		if self.openSubBoard != (-1, -1):
-			opened = self.board[self.openSubBoard[1]][self.openSubBoard[0]].getFree(*self.openSubBoard)
-		if self.openSubBoard == (-1, -1) or len(opened) == 0:
+			self.opened = self.board[self.openSubBoard[1]][self.openSubBoard[0]].getFree(*self.openSubBoard)
+		if self.openSubBoard == (-1, -1) or self.opened == set():
 			self.openSubBoard = (-1, -1)
-			opened = set()
 			for x in range(3):
 				for y in range(3):
-					opened = opened.union(self.board[y][x].getFree(x, y))
-		return opened
-	def checkWholeWin(self):
+					self.opened.update(self.board[y][x].getFree(x, y))
+	def toSmallBoard(self):
 		board = SmallBoard()
-		board.board = [[b.won for b in line] for line in self.board]
-		return board.isWon()
-	def makeMove(self, pos: tuple[int, int], move) -> tuple[bool, int]:
-		if free := (pos in self.opened):
-			won = self.board[pos[1] // 3][pos[0] // 3].makeMove(pos[0] % 3, pos[1] % 3, move)
-			if won:
-				self.won = self.checkWholeWin()
+		for y, line in enumerate(self.board):
+			for x, b in enumerate(line):
+				if board.done(): return board
+				if b.won:
+					board.makeMove(x, y, b.won)
+		return board
+	def checkBoardEnd(self):
+		small = self.toSmallBoard()
+		self.done = small.done() or all([all([b.done() for b in line]) for line in self.board])
+	def makeMove(self, pos: tuple[int, int], move) -> bool:
+		if sucess := (pos in self.opened):
+			small = self.board[pos[1] // 3][pos[0] // 3]
 			self.openSubBoard = pos[0] % 3, pos[1] % 3
-			if self.board[pos[1] % 3][pos[0] % 3].won: self.openSubBoard = (-1, -1)
-			self.opened = self.getOpened()
-		return free, self.won
-
+			small.makeMove(*self.openSubBoard, move)
+			if small.done():
+				self.checkBoardEnd()
+			self.getOpened()
+		return sucess
+	def moveMade(self, pos, move):
+		b = self.copy()
+		b.makeMove(pos, move)
+		return b
+	
 	def drawLines(self, display, pos=(0, 0), big=True):
 		if big: pygame.draw.line(display, LINE_COLOR, (0, BOARD_Y), (WIDTH, BOARD_Y), HEADER_LINE_THICKNESS)
 		for i in range(3):
@@ -162,7 +186,6 @@ class Game:
 	def __init__(self, vsAi=False):
 		self.board = Board()
 		self.playerOnTurn: int = 1 # 1, 2
-		self.won = 0 # 0, 1, 2
 		self.vsAi = vsAi
 
 		if vsAi:
@@ -171,22 +194,20 @@ class Game:
 			self.endEvent = threading.Event()
 			self.aiThread = threading.Thread(target=Ai.threadLoop, args=(self.aiQueue, self.responseQueue, self.endEvent), daemon=True)
 			self.aiThread.start()
-			self.waitingForAi = False
 
 	def _getClickPos(self, mousePos):
 		if mousePos[1] < BOARD_Y: return (-1, -1)
 		return (mousePos[0] // CELL_SIZE, (mousePos[1] - BOARD_Y) // CELL_SIZE)
-	def makeMove(self, move: tuple[int, int]) -> tuple[bool, int]:
-		sucess, won = self.board.makeMove(move, self.playerOnTurn)
-		if sucess:
-			if won: self.won = won
+	def makeMove(self, move: tuple[int, int], aiPlays=False):
+		sucess = self.board.makeMove(move, self.playerOnTurn)
+		if aiPlays: assert sucess, f'The ai made invalid move {move}'
+		if sucess and not self.board.done:
 			self.advancePlayer()
-		return sucess, won
 	def click(self, mousePos):
+		if self.vsAi and self.playerOnTurn == 2: return
 		pos = self._getClickPos(mousePos)
 		if pos == (-1, -1): return
-		if self.vsAi and self.playerOnTurn == 2: return
-		sucess, won = self.makeMove(pos)
+		self.makeMove(pos)
 		if self.vsAi and self.playerOnTurn == 2:
 			self.sendToThread()
 	def advancePlayer(self):
@@ -198,21 +219,17 @@ class Game:
 		renderText(display, LINE_COLOR, HEADER_TEXT_POS, headerText)
 	# ai integration
 	def sendToThread(self):
-		self.waitingForAi = True
 		self.aiQueue.put(self.board.copy())
 	def update(self):
 		assert self.aiThread.is_alive(), 'Ai thread died'
 		try:
 			move = self.responseQueue.get(block=False)
-			self.waitingForAi = False
 		except Empty:
 			return False
-		sucess, _ = self.makeMove(move)
-		assert sucess, f'The ai made invalid move {move}'
+		self.makeMove(move, aiPlays=True)
 	def close(self):
-		self.endEvent.set()
-		while self.aiThread.is_alive():
-			pass
+		if self.vsAi:
+			self.endEvent.set()
 
 def menu(display: pygame.Surface) -> int: # modes: 0 - exit, 1 - PvP, 2 - vs ai
 	display.fill(BACKGROUND_COLOR)
@@ -234,7 +251,9 @@ def menu(display: pygame.Surface) -> int: # modes: 0 - exit, 1 - PvP, 2 - vs ai
 		pygame.time.Clock().tick(FPS)
 def winScreen(display: pygame.Surface, won: int, mode: int):
 	display.fill(BACKGROUND_COLOR)
-	if mode == 1:
+	if mode == 0:
+		text = "It's a draw!!"
+	elif mode == 1:
 		text = f'{["First", "Second"][won-1]} player won!!'
 	else:
 		text = ["You won!!  :-)", "The AI won!!  :-("][won-1]
@@ -250,35 +269,37 @@ def winScreen(display: pygame.Surface, won: int, mode: int):
 				return
 		pygame.time.Clock().tick(FPS)
 
-def game(display: pygame.Surface, mode: int) -> int:	
+def game(display: pygame.Surface, mode: int) -> tuple[int, int]:	
 	game = Game(mode == 2)
+
+	closed = False
 	running = True
 	while running:
 		for event in pygame.event.get():
 			if event.type == pygame.QUIT:
+				closed = True
 				running = False
 			elif event.type == pygame.MOUSEBUTTONDOWN:
 				if event.button == 1:
 					game.click(event.pos)
 		
 		if mode == 2: game.update()
-		if game.won:
+		if game.board.done:
 			running = False
 		else:
 			display.fill(BACKGROUND_COLOR)
 			game.draw(display)
 			pygame.display.update()
 			pygame.time.Clock().tick(FPS)
-	won = game.won
 	game.close()
-	return won
+	return closed, game.board.won
 
 def main():
 	display = pygame.display.set_mode((WIDTH, HEIGHT))
 	mode = menu(display)
 	if mode == 0: return
-	won = game(display, mode)
-	if won == 0: return
+	closed, won = game(display, mode)
+	if closed: return
 	winScreen(display, won, mode)
 
 if __name__ == '__main__':
